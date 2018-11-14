@@ -18,9 +18,8 @@ from urllib.request import urlretrieve
 import string
 import os
 
-from collections import Counter
 
-import math
+from math import log2
 
 import json
 import pickle
@@ -251,9 +250,73 @@ class TFIDF:
     
     def load_inverted_index_1(self):
         """
-        This will load the inverted index saved in pickle format
+        This will load the inverted index saved in pickle format.
         """
         with open('inverted_index_1.pkl', 'rb') as p:
             inv_ind = pickle.load(p)
         return inv_ind
+        
+    
+    def IDF(self,inverted_index):
+        """
+        This buils the idf for all the terms in the vocab 
+        and stores them in a dictionary.
+        """
+        l = {}
+        for term in self.vocab:
+            l[term] = log2(18259/len(inverted_index[term]))
+        return l
+    
+    
+    def TF(self):
+        """
+        
+        TODO: WE CAN MULTIPLY THE IDF WHILE BUILD THIS TF FOR THE SAKE OF TIME COMPLEXITY
+        This compute the TF score and return a dictionary.
+        The dictionary has {
+                            term_id_1: [{doc_1: TF_doc_1},
+                                     {doc_2: TF_doc_2},
+                                     {doc_j: TF_doc_j}],
+                            term_id_2: [{doc_4: TF_doc_4},
+                                     {doc_2: TF_doc_2},
+                                     {doc_j: TF_doc_j}]
+                           }
+        """
+        dic = {}
+        for i in range(1,18259):
+            with open("./docs/doc_"+str(i)+'.tsv','r') as doc:
+                content = doc.read().split('\t')
+                desc_title = content[4].split()+content[7].split()
+                
+                for elem in desc_title:
+                    term_int = self.vocab[elem]
+                    if term_int not in dic:
+                        dic[term_int] = {"doc_"+str(i): 1/len(desc_title)}
+                        
+                    else:
+                        doc_to_tfs = dic[term_int]
+                        s = "doc_"+str(i)
+                        if s not in doc_to_tfs:
+                            doc_to_tfs[s] = 1/len(desc_title)
+                        else:
+                            doc_to_tfs.update({s: (doc_to_tfs[s])+(1/len(desc_title))})
+                        
+                        dic.update({term_int : doc_to_tfs})
+        return dic
+                
+                
+    def salampancett(self):
+        """
+        {
+        term_1:{doc_1: TFIDF_doc1}, {doc_2: TFIDF_doc2}
+        }
+        """
+        w = {}
+        for term in self.vocab:
+            for key in self.vocab[term]:
+                pass
+                
+        
+    def build_inverted_index_tfidf(self):
+        pass
         
