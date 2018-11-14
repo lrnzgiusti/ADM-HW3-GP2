@@ -12,10 +12,18 @@ import nltk
 from nltk.corpus import stopwords 
 from nltk.tokenize import word_tokenize 
 
+import re
 
 from urllib.request import urlretrieve
 import string
 import os
+
+from collections import Counter
+
+import math
+
+import json
+import pickle
 
 def timeit(method):
     """
@@ -40,11 +48,14 @@ class NLP():
     
     def stemming(self, s):
         """
-        This will perform the stemming over all the strings
+        This will perform the snowball stemming over all the strings
         """
         return ' '.join(self.stemmer.stem(token) for token in nltk.word_tokenize(s))
     
     def remove_stopwords(self,s):
+        """
+        Remove stopwords
+        """
         stop_words = set(stopwords.words('english')) 
         word_tokens = word_tokenize(s)         
         filtered_sentence = [w for w in word_tokens if not w in stop_words]         
@@ -56,9 +67,15 @@ class NLP():
     def remove_whitespaces(self, s):
         return s.translate(str.maketrans(string.whitespace, ' '*len(string.whitespace)))
     
-    @timeit
     def perform_everything(self, s):
-        return self.stemming(self.remove_punctuation(self.remove_whitespaces(self.remove_stopwords(s))))
+        return self.remove_string_special_chars(self.stemming(self.remove_punctuation(self.remove_whitespaces(self.remove_stopwords(s)))))
+    
+    def remove_string_special_chars(self, s):
+        stripped = re.sub(r'[^\w\s]', '', s)
+        stripped = re.sub(r'_', ' ', stripped)
+        stripped = re.sub(r'\s+', ' ', stripped)
+        stripped = stripped.strip()
+        return stripped
     
     
 class FileHandler():
@@ -93,7 +110,8 @@ class FileHandler():
     @timeit
     def _csv_to_tsv(self):
         """
-        This transform the csv file into a directory containing 18260 files with only one row.
+        This transform the csv file into a big tsv file.
+        The big tsv file is a processed version of the csv file
         """
         try:
             df = self._pickle_to_df() #file non found is handled here
@@ -110,7 +128,9 @@ class FileHandler():
     @timeit
     def _tsv_to_tsv_docs(self, dirname = 'docs', trials = 0):
         """
-        This transform the csv file into a directory containing 18260 files with only one row.
+        This transform the big tsv file into a directory.
+        The directory contains about 18260 files with only one row.
+        The row is an house in airbnb
         """
         #this try check if the big tsv file exist, else we create a new one
         try:
@@ -138,6 +158,9 @@ class FileHandler():
     
     @timeit
     def _pickle_to_df(self, trials = 0): 
+        """
+        This loads the pickle file associated with the dataframe.
+        """
         df = pd.DataFrame()
         try:
             df = pd.read_pickle('airbnb.pkl')         
@@ -158,27 +181,79 @@ class FileHandler():
         
     @timeit
     def _download_csv(self):
+        """
+        This download the Airbnb cvs file
+        """
         url = "https://raw.githubusercontent.com/lrnzgiusti/ADM-HW3-GP2/master/Airbnb_Texas_Rentals.csv"
         urlretrieve(url, "airbnb.csv")
         return "OK"
 
 
 
-class SearchEngine:
-    """
-    This will be a great super-class
-    """
-    tre = 5
-    def __init__(self):
-        self.quattro = 5
-        
-    def test(self):
-        print(self.tre, self.quattro)
-        
-class pino(SearchEngine):
+class TFIDF:
     
     def __init__(self):
-        self.testo = 10
+        self.vocab = self.read_vocab()
     
+    @timeit
+    def build_vocab(self):
+        """
+        This function will build a vocab and save it in json format.
+        The vocab contains word in the description and in the title
+        """
+        vocab = {}
+        idx = 1
+        for i in range(1,18259):
+            with open("./docs/doc_"+str(i)+'.tsv','r') as doc:
+                desc = doc.read().split('\t')
+                desc_title = desc[4].split()+desc[7].split()
+                for word in desc_title:
+                    if word not in vocab:
+                        vocab[word] = idx
+                        idx += 1
+        json.dump(vocab, open('vocab.json', 'w', encoding='utf-8'))
+        return vocab
+                
+    def read_vocab(self):
+        """
+        This read the vocabolary and return it.
+        """
+        try:
+            return json.load(open('vocab.json', 'r'))
+        except:
+            self.build_vocab()
+            return self.read_vocab()
+        
+    def build_inverted_index_normal(self):
+        """
+        This build the inverted index based on the title and description
+        Deprecated: we have a mapreduce version. 
+        """
+        dic = {}
+        for i in range(1,18259):
+            with open("./docs/doc_"+str(i)+'.tsv','r') as doc:
+                content = doc.read().split('\t')
+                desc_title = content[4].split()+content[7].split()
+                
+                for elem in desc_title:
+                    term_int = self.vocab[elem]
+                    if term_int not in dic:
+                        s = "doc_"+str(i)
+                        a = set()
+                        a.add(s)
+                        dic[term_int] = a
+                    else:
+                        l = dic[term_int]
+                        s = "doc_"+str(i)
+                        l.add(s)
+                        dic[term_int] = l
+        return dic
     
-    
+    def load_inverted_index_1(self):
+        """
+        This will load the inverted index saved in pickle format
+        """
+        with open('inverted_index_1.pkl', 'rb') as p:
+            inv_ind = pickle.load(p)
+        return inv_ind
+        
