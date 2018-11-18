@@ -19,12 +19,16 @@ import string
 import os
 
 
-from math import log2
+from math import log10, log
 
 import json
 import pickle
 
 from scipy.spatial.distance import cosine
+
+import heapq
+
+from geopy import distance, geocoders
 
 def timeit(method):
     """
@@ -155,7 +159,29 @@ class FileHandler():
                 ftmp.write(line)
             i += 1
         f.close()
-        os.remove('./docs/doc_0.tsv')
+        os.remove('./' + dirname +'/doc_0.tsv')
+        return "OK"
+
+    def save_raw_docs(self, dirname='raw_docs', trials = 0):
+        try:
+            f = open('airbnb.csv', 'r')
+        except Exception:
+            return "KO"
+        #this check if the dir with the files in exist else we create a new one
+        if not os.path.isdir(dirname):
+            os.mkdir(dirname)
+
+        #core
+        i = 0
+        for line in f:
+            with open('./'+dirname+'/doc_'+str(i)+'.csv', 'w') as ftmp:
+                ftmp.write('"","average_rate_per_night","bedrooms_count",'+
+                           '"city","date_of_listing","description","latitude",'+
+                           '"longitude","title","url"\n')
+                ftmp.write(line)
+            i += 1
+        f.close()
+        os.remove('./' + dirname + '/doc_0.csv')
         return "OK"
 
     @timeit
@@ -217,7 +243,7 @@ class Miner:
 
     def read_vocab(self):
         """
-        This read the vocabolary and return it.
+        This read the vocabolary and return it as a python dictionary.
         """
         try:
             return json.load(open('vocab.json', 'r'))
@@ -267,7 +293,7 @@ class Miner:
         l = {}
         inverted_vocab = {y:x for x, y in self.vocab.items()}
         for term in inverted_vocab:
-            l[term] = log2(18259/len(inverted_index[term]))
+            l[term] = log10(18259/len(inverted_index[term]))
         return l
 
 
@@ -283,11 +309,8 @@ class Miner:
                                      doc_j: TF_doc_j}
                            }
         """
-        
+
         dic = {}
-        
-        
-        
         for i in range(1,18259):
             with open("./docs/doc_"+str(i)+'.tsv', 'r') as doc:
                 content = doc.read().split('\t')
@@ -307,31 +330,39 @@ class Miner:
                             doc_to_tfs.update({s: (doc_to_tfs[s])+(1/len(desc_title))})
 
                         dic.update({term_int : doc_to_tfs})
-            
+
         return dic
 
 
     def TFIDF(self):
         """
+        This function build the second inverted index based on the tf_idf score.
+        The tf_idf score stored is the one of the term in each document.
         {
-        term_1:{doc_1: TFIDF_doc1 ,doc_2: TFIDF_doc2},
-        term_2:{doc_6: TFIDF_doc6 ,doc_5: TFIDF_doc5},
+            term_1:{doc_1: TFIDF_doc1 ,doc_2: TFIDF_doc2},
+            term_2:{doc_6: TFIDF_doc6 ,doc_5: TFIDF_doc5},
         }
         """
         tf_score = self.TF()
         idf_score = self.IDF(self._load_inverted_index_1())
         for term_id in tf_score:
             tf_score[term_id].update(
-                    {n: idf_score[term_id] * tf_score[term_id][n] 
+                    {n: idf_score[term_id] * tf_score[term_id][n]
                     for n in tf_score[term_id].keys()})
 
         return tf_score
 
     def tfidf_saver(self):
+        """
+        This method is for compute the inverted index with the tfidf and save is as json file
+        """
         with open('tfidf_score.json', 'w', encoding='utf-8')  as tfidf:
             return json.dump(fp=tfidf, obj=self.TFIDF())
 
     def tfidf_loader(self):
+        """
+        This method is used for load the inverted index stored before with the tfidf_saver
+        """
         try:
             with open('tfidf_score.json', 'r', encoding='utf-8')  as tfidf:
                 payload = json.load(fp=tfidf)
@@ -340,32 +371,60 @@ class Miner:
             self.tfidf_saver()
             return self.tfidf_loader()
 
-
-
-
-    def query_tfidf_builder(self):
-
-        query_string = input().split()
+    def _query_builder(self, s='Insert your query: '):
+        """
+        This function is used for build the query:
+        After the user input the string is processed and returned as a list of indexes
+        The indexes are made as the value of each processed element of the query in the vocabulary.
+        """
+        query_string = input(s).split()
         query_string = list(map(NLP().perform_everything, query_string))
         query_string = [self.vocab[key] for key in query_string  if key in self.vocab ]
         return query_string
 
 
-    def cosine_dist_one(self, query, doc):
-        
+    def _docs_containing_all_the_query(self, query):
+        """
+        This function returns a set containing the intersection of the documents
+        that contains all the words in the query, the query passed to this funciton is
+        already vectorized with respect to our vocab
+        """
+        omega  = set(self.inverted_index_1[query[0]])
+        for i in range(1,len(query)):
+            omega=omega.intersection(self.inverted_index_1[query[i]] )
+        return omega
+
+
+    def conjunctive_result(self, dirname= 'raw_docs'):
+        query = self._query_builder()
+        documents_containing_entire_query = self._docs_containing_all_the_query(query)
+        df = pd.DataFrame(columns=['title','description','city','url'])
+        for elem in documents_containing_entire_query:
+            df = df.append(pd.read_csv('./'+dirname+'/'+elem+'.csv',
+                                       encoding='utf-8',
+                                       usecols=['title','description','city','url']
+                                       ), ignore_index=True, sort=False)
+        return df
+
+
+    def _cosine_dist_one(self, query, doc):
+        """
+        This function compute the cosine similarity (it was asked for the similarity),
+        for the input query and the document passed by parameter
+        """
         cos_dist = []
         for elem in query:
             if doc in self.inverted_index_1[elem]:
                 cos_dist.append(self.inverted_index_2[elem][doc])
             else:
                 cos_dist.append(0)
-            
+
         if any(cos_dist):
             return 1-cosine(cos_dist, query)
         else:
             return 0
 
-    def cosine_dist_all(self, query):
+    def cosine_dist_all(self, query, clean_zeros=False):
         """
         The result is a dictionary that contains {doc_1: cos_sim(query, doc_1),
                                                   doc_2: cos_sim(query, doc_2)}
@@ -373,6 +432,76 @@ class Miner:
         s = "doc_"
         cosine_score = {}
         for i in range(1,18259):
-            cosine_score.update({s+str(i) : self.cosine_dist_one(query, s+str(i))})
-            
+            cosine_dist = self._cosine_dist_one(query, s+str(i))
+            if clean_zeros == True:
+                if cosine_dist != 0:
+                    cosine_score.update({s+str(i) : cosine_dist})
+            else:
+                cosine_score.update({s+str(i) : cosine_dist})
         return cosine_score
+
+
+    def heapify(self, score, k =10):
+        """
+        
+        """
+        heap = []
+        for i in score:
+            heapq.heappush(heap, (score[i], i) )
+
+        return heapq.nlargest(k, heap)
+
+
+    def conjunct_ranking_result(self, dirname='raw_docs'):
+        query = self._query_builder()
+        cos_score = self.cosine_dist_all(query, clean_zeros=True)
+        heap_result= self.heapify(cos_score)
+        df = pd.DataFrame(columns=['title','description','city','url'])
+        for elem in heap_result:
+            df = df.append(pd.read_csv('./'+dirname+'/'+elem[1]+'.csv',
+                                       encoding='utf-8',
+                                       usecols=['title','description','city','url']
+                                       ), ignore_index=True, sort=False)
+            df['score'] = elem[0]
+        return df
+
+    def _score(self, price_max ,rooms_max, wante_city_coords, record, docid):
+        texas_radius = 1298
+
+        def price_getter(actual_price, max_price):
+                if actual_price > max_price:
+                    return ((max_price-log(actual_price))/actual_price)
+
+                else:
+                    return ((-log(actual_price)+max_price)/max_price)
+
+        def rooms_getter(actual_room_number, max_room_number):
+           return(min(actual_room_number/max_room_number, max_room_number/actual_room_number))
+
+
+
+        document_price = int(record['average_rate_per_night'].split('$')[1])
+        try:
+            document_rooms = int(record['bedrooms_count']) #trasformare studio in 0
+
+        except:
+            document_rooms = 0.5
+
+        price_score = price_getter(document_price, price_max)
+        room_score = rooms_getter(document_rooms, rooms_max)
+
+        geo_score = (1-distance.distance(wante_city_coords, (record.loc['latitude'], record.loc['longitude'])).km/texas_radius)
+        return ('doc_'+str(docid), (1/3)*(geo_score+price_score+room_score))
+
+
+
+
+    def get_all_scores(self):
+        gn = geocoders.GeoNames(username='lrnzgiusti')
+        #df = #il dataframe che esce fuori dalla query 3.1
+        q = self._query_builder()
+        price_max = input('What price you want?')
+        room_count = input('Hou many rooms you want?')
+        wanted_city = input('In which city you would stay?')
+        _, city_coords = gn.geocode(wanted_city+', TX',timeout=30) #wanted city è un input
+        df['score'] = df.apply(lambda x: self._score(), axis = 1)
