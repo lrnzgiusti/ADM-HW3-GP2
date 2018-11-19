@@ -22,6 +22,7 @@ from scipy.spatial.distance import cosine
 from geopy import distance, geocoders
 
 import pandas as pd
+
 def timeit(method):
     """
     Decorator for timing the execution speed of functions
@@ -51,7 +52,7 @@ class NLP():
         This will perform the snowball stemming over all the strings
         """
         return ' '.join(self.stemmer.stem(token) for token in nltk.word_tokenize(s))
-
+    
     def remove_stopwords(self, s):
         """
         Remove stopwords
@@ -63,10 +64,10 @@ class NLP():
 
     def remove_punctuation(self, s):
         return s.translate(str.maketrans('', '', string.punctuation))
-
+   
     def remove_whitespaces(self, s):
         return s.translate(str.maketrans(string.whitespace, ' '*len(string.whitespace)))
-
+    
     def perform_everything(self, s):
         return self.remove_string_special_chars(
             self.stemming(
@@ -104,8 +105,7 @@ class FileHandler():
         except FileNotFoundError:
             if trials < 2:
                 if self._download_csv() == "OK":
-                    self._csv_to_pickle(trials=trials +1)
-                    return "OK"
+                    return self._csv_to_pickle(trials=trials +1)
                 else:
                     return "KO"
         print("File csv load with success, saving the pickle...")
@@ -137,10 +137,9 @@ class FileHandler():
         try:
             f = open('airbnb.tsv', 'r')
         except FileNotFoundError:
-            self._csv_to_tsv()
-            if trials < 1:
-                self._tsv_to_tsv_docs(trials=trials+1)
-                return "Recurring"
+            if trials <= 2:
+                self._csv_to_tsv()
+                return self._tsv_to_tsv_docs(trials=trials+1)
             else:
                 return "KO"
         #this check if the dir with the files in exist else we create a new one
@@ -156,12 +155,17 @@ class FileHandler():
         f.close()
         os.remove('./' + dirname +'/doc_0.tsv')
         return "OK"
-
-    def save_raw_docs(self, dirname='raw_docs'):
+    
+    @timeit
+    def save_raw_docs(self, dirname='raw_docs', trials = 0):
         try:
             f = open('airbnb.csv', 'r')
         except FileNotFoundError:
-            return "KO"
+            if trials <= 2:
+                self._download_csv()
+                return self.save_raw_docs(trials = trials +1)
+            else:
+                return "KO"
         #this check if the dir with the files in exist else we create a new one
         if not os.path.isdir(dirname):
             os.mkdir(dirname)
@@ -190,8 +194,7 @@ class FileHandler():
         except FileNotFoundError:
             if trials < 2:
                 if self._csv_to_pickle() == "OK":
-                    self._pickle_to_df(trials=trials +1)
-                    return "Recurring"
+                    return self._pickle_to_df(trials=trials +1)
                 else:
                     return "KO"
         if df.empty:
@@ -217,15 +220,20 @@ class Miner:
     """
     
     def __init__(self):
-        self.vocab = self.read_vocab()
-        self.inverted_index_1 = self._load_inverted_index_1()
-        self.inverted_index_2 = self.tfidf_loader()
+        pass
+        #self.vocab = self.read_vocab()
+        #self.inverted_index_1 = self._load_inverted_index_1()
+        #self.inverted_index_2 = self.tfidf_loader()
 
     @timeit
-    def build_vocab(self):
+    def build_vocab(self, save=False):
         """
         This function will build a vocab and save it in json format.
         The vocab contains word in the description and in the title
+        
+        :param save: bool, is True it will save the result in a json file
+        
+        :return "OK" if everything goes well, then an inner variable self.vocab is set with the dict
         """
         vocab = {}
         idx = 1
@@ -237,9 +245,12 @@ class Miner:
                     if word not in vocab:
                         vocab[word] = idx
                         idx += 1
-        json.dump(vocab, open('vocab.json', 'w', encoding='utf-8'))
-        return vocab
+        self.vocab = vocab
+        if save:
+            json.dump(vocab, open('vocab.json', 'w', encoding='utf-8'))
+        return "OK, vocabulary in the attribute Miner().vocab"
 
+    @timeit
     def read_vocab(self):
         """
         This read the vocabolary and return it as a python dictionary.
@@ -250,7 +261,8 @@ class Miner:
             self.build_vocab()
             return self.read_vocab()
 
-    def build_inverted_index_normal(self):
+    @timeit
+    def build_inverted_index_normal(self, save=False):
         """
         This build the inverted index based on the title and description
         Deprecated: we have a mapreduce version.
@@ -272,16 +284,26 @@ class Miner:
                         s = "doc_"+str(i)
                         l.add(s)
                         dic[term_int] = l
-        return dic
+        self.inverted_index_no_tfidf = dic
+        if save:
+            with open('inverted_index_no_tfidf.pkl', 'wb') as p:
+                pickle.dump(dic, p)
+        return "OK, inverted index set in the attribute Miner().inverted_index_no_tfidf"
 
-    def _load_inverted_index_1(self):
+    @timeit
+    def _load_inverted_index_no_tfidf(self):
         """
         This will load the inverted index saved in pickle format.
         """
-        with open('inverted_index_1.pkl', 'rb') as p:
-            inv_ind = pickle.load(p)
+        try:
+            with open('inverted_index_no_tfidf.pkl', 'rb') as p:
+                inv_ind = pickle.load(p)
+        except FileNotFoundError:
+            self.build_inverted_index_normal(save=True)
+            return self._load_inverted_index_no_tfidf()
         return inv_ind
 
+    @timeit
     def IDF(self, inverted_index):
         """
         This buils the idf for all the terms in the vocab
@@ -293,6 +315,7 @@ class Miner:
             l[term] = log10(18259/len(inverted_index[term]))
         return l
 
+    @timeit
     def TF(self):
         """
         This compute the TF score and return a dictionary.
@@ -329,8 +352,8 @@ class Miner:
 
         return dic
 
-
-    def TFIDF(self):
+    @timeit
+    def TFIDF(self, save=False):
         """
         This function build the second inverted index based on the tf_idf score.
         The tf_idf score stored is the one of the term in each document.
@@ -340,21 +363,18 @@ class Miner:
         }
         """
         tf_score = self.TF()
-        idf_score = self.IDF(self._load_inverted_index_1())
+        idf_score = self.IDF(self._load_inverted_index_no_tfidf())
         for term_id in tf_score:
             tf_score[term_id].update(
                 {n: idf_score[term_id] * tf_score[term_id][n]
                      for n in tf_score[term_id].keys()})
+        self.inverted_index_tfidf = tf_score
+        if save:
+             with open('tfidf_score.json', 'w', encoding='utf-8')  as tfidf:
+                return json.dump(fp=tfidf, obj=self.inverted_index_tfidf)
+        return "OK, inverted index set in the attribute Miner().inverted_index_tfidf"
 
-        return tf_score
-
-    def tfidf_saver(self):
-        """
-        This method is for compute the inverted index with the tfidf and save is as json file
-        """
-        with open('tfidf_score.json', 'w', encoding='utf-8')  as tfidf:
-            return json.dump(fp=tfidf, obj=self.TFIDF())
-
+    @timeit
     def tfidf_loader(self):
         """
         This method is used for load the inverted index stored before with the tfidf_saver
@@ -364,9 +384,10 @@ class Miner:
                 payload = json.load(fp=tfidf)
                 return {int(key): payload[key] for key in payload}
         except FileNotFoundError:
-            self.tfidf_saver()
+            self.TFIDF(save=True)
             return self.tfidf_loader()
-
+        
+    @timeit
     def _query_builder(self, s='Insert your query: '):
         """
         This function is used for build the query:
@@ -378,18 +399,19 @@ class Miner:
         query_string = [self.vocab[key] for key in query_string  if key in self.vocab]
         return query_string
 
+    @timeit
     def _docs_containing_all_the_query(self, query):
         """
         This function returns a set containing the intersection of the documents
         that contains all the words in the query, the query passed to this funciton is
         already vectorized with respect to our vocab
         """
-        omega = set(self.inverted_index_1[query[0]])
+        omega = set(self.inverted_index_no_tfidf[query[0]])
         for i in range(1, len(query)):
-            omega = omega.intersection(self.inverted_index_1[query[i]])
+            omega = omega.intersection(self.inverted_index_no_tfidf[query[i]])
         return omega
 
-
+    @timeit
     def conjunctive_result(self, dirname='raw_docs'):
         query = self._query_builder()
         documents_containing_entire_query = self._docs_containing_all_the_query(query)
@@ -399,6 +421,7 @@ class Miner:
                                        encoding='utf-8'), ignore_index=True, sort=False)
         return df
 
+    @timeit
     def _cosine_dist_one(self, query, doc):
         """
         This function compute the cosine similarity (it was asked for the similarity),
@@ -406,8 +429,8 @@ class Miner:
         """
         cos_dist = []
         for elem in query:
-            if doc in self.inverted_index_1[elem]:
-                cos_dist.append(self.inverted_index_2[elem][doc])
+            if doc in self.inverted_index_tfidf[elem]:
+                cos_dist.append(self.inverted_index_tfidf[elem][doc])
             else:
                 cos_dist.append(0)
 
@@ -416,6 +439,7 @@ class Miner:
         else:
             return 0
 
+    @timeit
     def cosine_dist_all(self, query, clean_zeros=False):
         """
         The result is a dictionary that contains {doc_1: cos_sim(query, doc_1),
@@ -431,6 +455,7 @@ class Miner:
                 cosine_score.update({i : cosine_dist})
         return cosine_score
 
+    @timeit
     def heapify(self, score, k=10):
         """
         Top k scores according to heapsort
@@ -442,6 +467,7 @@ class Miner:
 
         return heapq.nlargest(k, heap)
 
+    @timeit
     def conjunct_ranking_result(self, dirname='raw_docs'):
         query = self._query_builder()
         cos_score = self.cosine_dist_all(query, clean_zeros=True)
@@ -457,6 +483,7 @@ class Miner:
             del dftmp
         return df
 
+    @timeit
     def _score(self, price_max,rooms_max, wante_city_coords, record):
         texas_radius = 1298 #not random, we've calculated it
 
@@ -486,6 +513,7 @@ class Miner:
                                          (record.loc['latitude'], record.loc['longitude'])).km/texas_radius)
         return (1/3)*(geo_score+price_score+room_score)
 
+    @timeit
     def get_all_scores(self):
         """
         This method get the score according to the parameters passed by input by the user
