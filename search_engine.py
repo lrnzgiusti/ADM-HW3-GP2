@@ -6,30 +6,21 @@ Created on Mon Nov 12 08:11:30 2018
 @author: ince
 """
 import time
-import pandas as pd
-
+import json
+import pickle
+import string
+import os
+import heapq
+import re
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-
-import re
-
 from urllib.request import urlretrieve
-import string
-import os
-
-
 from math import log10, log
-
-import json
-import pickle
-
 from scipy.spatial.distance import cosine
-
-import heapq
-
 from geopy import distance, geocoders
 
+import pandas as pd
 def timeit(method):
     """
     Decorator for timing the execution speed of functions
@@ -48,6 +39,9 @@ def timeit(method):
 
 class NLP():
 
+    """
+    Text processing
+    """
     def __init__(self):
         self.stemmer = nltk.stem.SnowballStemmer('english')
 
@@ -75,9 +69,9 @@ class NLP():
     def perform_everything(self, s):
         return self.remove_string_special_chars(
             self.stemming(
-                    self.remove_punctuation(
-                            self.remove_whitespaces(
-                                    self.remove_stopwords(s)))))
+                self.remove_punctuation(
+                    self.remove_whitespaces(
+                        self.remove_stopwords(s)))))
 
     def remove_string_special_chars(self, s):
         stripped = re.sub(r'[^\w\s]', '', s)
@@ -88,7 +82,10 @@ class NLP():
 
 
 class FileHandler():
-
+    """
+    Class for handling csv, tsv, pkl files, also for load dataFrame from an object file
+    """
+    
     def __init__(self, download=False):
         pass
 
@@ -103,7 +100,7 @@ class FileHandler():
             df = pd.read_csv('airbnb.csv', sep=',')
             df.to_pickle('airbnb.pkl')
             return "OK"
-        except Exception:
+        except FileNotFoundError:
             if trials < 2:
                 if self._download_csv() == "OK":
                     self._csv_to_pickle(trials=trials +1)
@@ -119,16 +116,13 @@ class FileHandler():
         This transform the csv file into a big tsv file.
         The big tsv file is a processed version of the csv file
         """
-        try:
-            df = self._pickle_to_df() #file non found is handled here
-            df['description'] = df['description'].apply(str)
-            df['description'] = df['description'].apply(NLP().perform_everything)
-            df['title'] = df['title'].apply(str)
-            df['title'] = df['title'].apply(NLP().perform_everything)
-            df.drop(df.columns[0], axis=1, inplace=True)
-            df.to_csv('airbnb.tsv', encoding='UTF-8', sep='\t', index=False)
-        except Exception:
-            return "KO"
+        df = self._pickle_to_df() #file non found is handled here
+        df['description'] = df['description'].apply(str)
+        df['description'] = df['description'].apply(NLP().perform_everything)
+        df['title'] = df['title'].apply(str)
+        df['title'] = df['title'].apply(NLP().perform_everything)
+        df.drop(df.columns[0], axis=1, inplace=True)
+        df.to_csv('airbnb.tsv', encoding='UTF-8', sep='\t', index=False)
         return "OK"
 
     @timeit
@@ -141,7 +135,7 @@ class FileHandler():
         #this try check if the big tsv file exist, else we create a new one
         try:
             f = open('airbnb.tsv', 'r')
-        except Exception:
+        except FileNotFoundError:
             self._csv_to_tsv()
             if trials < 1:
                 self._tsv_to_tsv_docs(trials=trials+1)
@@ -162,10 +156,10 @@ class FileHandler():
         os.remove('./' + dirname +'/doc_0.tsv')
         return "OK"
 
-    def save_raw_docs(self, dirname='raw_docs', trials = 0):
+    def save_raw_docs(self, dirname='raw_docs'):
         try:
             f = open('airbnb.csv', 'r')
-        except Exception:
+        except FileNotFoundError:
             return "KO"
         #this check if the dir with the files in exist else we create a new one
         if not os.path.isdir(dirname):
@@ -192,14 +186,14 @@ class FileHandler():
         df = pd.DataFrame()
         try:
             df = pd.read_pickle('airbnb.pkl')
-        except Exception:
+        except FileNotFoundError:
             if trials < 2:
                 if self._csv_to_pickle() == "OK":
                     self._pickle_to_df(trials=trials +1)
                     return "Recurring"
                 else:
                     return "KO"
-        if len(df) == 0:
+        if df.empty:
             return self._pickle_to_df()
         else:
             return df
@@ -213,10 +207,11 @@ class FileHandler():
         urlretrieve(url, "airbnb.csv")
         return "OK"
 
-
-
 class Miner:
-
+    """
+    Controller
+    """
+    
     def __init__(self):
         self.vocab = self.read_vocab()
         self.inverted_index_1 = self._load_inverted_index_1()
@@ -230,7 +225,7 @@ class Miner:
         """
         vocab = {}
         idx = 1
-        for i in range(1,18259):
+        for i in range(1, 18259):
             with open("./docs/doc_"+str(i)+'.tsv', 'r') as doc:
                 desc = doc.read().split('\t')
                 desc_title = desc[4].split()+desc[7].split()
@@ -247,7 +242,7 @@ class Miner:
         """
         try:
             return json.load(open('vocab.json', 'r'))
-        except Exception:
+        except FileNotFoundError:
             self.build_vocab()
             return self.read_vocab()
 
@@ -257,11 +252,10 @@ class Miner:
         Deprecated: we have a mapreduce version.
         """
         dic = {}
-        for i in range(1,18259):
+        for i in range(1, 18259):
             with open("./docs/doc_"+str(i)+'.tsv', 'r') as doc:
                 content = doc.read().split('\t')
                 desc_title = content[4].split()+content[7].split()
-
                 for elem in desc_title:
                     term_int = self.vocab[elem]
                     if term_int not in dic:
@@ -284,8 +278,7 @@ class Miner:
             inv_ind = pickle.load(p)
         return inv_ind
 
-
-    def IDF(self,inverted_index):
+    def IDF(self, inverted_index):
         """
         This buils the idf for all the terms in the vocab
         and stores them in a dictionary.
@@ -295,7 +288,6 @@ class Miner:
         for term in inverted_vocab:
             l[term] = log10(18259/len(inverted_index[term]))
         return l
-
 
     def TF(self):
         """
@@ -311,7 +303,7 @@ class Miner:
         """
 
         dic = {}
-        for i in range(1,18259):
+        for i in range(1, 18259):
             with open("./docs/doc_"+str(i)+'.tsv', 'r') as doc:
                 content = doc.read().split('\t')
                 desc_title = content[4].split()+content[7].split()
@@ -347,8 +339,8 @@ class Miner:
         idf_score = self.IDF(self._load_inverted_index_1())
         for term_id in tf_score:
             tf_score[term_id].update(
-                    {n: idf_score[term_id] * tf_score[term_id][n]
-                    for n in tf_score[term_id].keys()})
+                {n: idf_score[term_id] * tf_score[term_id][n]
+                     for n in tf_score[term_id].keys()})
 
         return tf_score
 
@@ -366,7 +358,7 @@ class Miner:
         try:
             with open('tfidf_score.json', 'r', encoding='utf-8')  as tfidf:
                 payload = json.load(fp=tfidf)
-                return { int(key): payload[key] for key in payload }
+                return {int(key): payload[key] for key in payload}
         except FileNotFoundError:
             self.tfidf_saver()
             return self.tfidf_loader()
@@ -379,9 +371,8 @@ class Miner:
         """
         query_string = input(s).split()
         query_string = list(map(NLP().perform_everything, query_string))
-        query_string = [self.vocab[key] for key in query_string  if key in self.vocab ]
+        query_string = [self.vocab[key] for key in query_string  if key in self.vocab]
         return query_string
-
 
     def _docs_containing_all_the_query(self, query):
         """
@@ -389,23 +380,20 @@ class Miner:
         that contains all the words in the query, the query passed to this funciton is
         already vectorized with respect to our vocab
         """
-        omega  = set(self.inverted_index_1[query[0]])
-        for i in range(1,len(query)):
-            omega=omega.intersection(self.inverted_index_1[query[i]] )
+        omega = set(self.inverted_index_1[query[0]])
+        for i in range(1, len(query)):
+            omega = omega.intersection(self.inverted_index_1[query[i]])
         return omega
 
 
-    def conjunctive_result(self, dirname= 'raw_docs'):
+    def conjunctive_result(self, dirname='raw_docs'):
         query = self._query_builder()
         documents_containing_entire_query = self._docs_containing_all_the_query(query)
-        df = pd.DataFrame(columns=['title','description','city','url'])
+        df = pd.DataFrame()
         for elem in documents_containing_entire_query:
             df = df.append(pd.read_csv('./'+dirname+'/'+elem+'.csv',
-                                       encoding='utf-8',
-                                       usecols=['title','description','city','url']
-                                       ), ignore_index=True, sort=False)
+                                       encoding='utf-8'), ignore_index=True, sort=False)
         return df
-
 
     def _cosine_dist_one(self, query, doc):
         """
@@ -429,54 +417,54 @@ class Miner:
         The result is a dictionary that contains {doc_1: cos_sim(query, doc_1),
                                                   doc_2: cos_sim(query, doc_2)}
         """
-        s = "doc_"
         cosine_score = {}
-        for i in range(1,18259):
-            cosine_dist = self._cosine_dist_one(query, s+str(i))
+        for i in self._docs_containing_all_the_query(query):
+            cosine_dist = self._cosine_dist_one(query, i)
             if clean_zeros == True:
                 if cosine_dist != 0:
-                    cosine_score.update({s+str(i) : cosine_dist})
+                    cosine_score.update({i : cosine_dist})
             else:
-                cosine_score.update({s+str(i) : cosine_dist})
+                cosine_score.update({i : cosine_dist})
         return cosine_score
 
-
-    def heapify(self, score, k =10):
+    def heapify(self, score, k=10):
         """
-        
+        Top k scores according to heapsort
+
         """
         heap = []
         for i in score:
-            heapq.heappush(heap, (score[i], i) )
+            heapq.heappush(heap, (score[i], i))
 
         return heapq.nlargest(k, heap)
-
 
     def conjunct_ranking_result(self, dirname='raw_docs'):
         query = self._query_builder()
         cos_score = self.cosine_dist_all(query, clean_zeros=True)
-        heap_result= self.heapify(cos_score)
-        df = pd.DataFrame(columns=['title','description','city','url'])
+        heap_result = self.heapify(cos_score)
+        df = pd.DataFrame(columns=['title', 'description', 'city', 'url'])
         for elem in heap_result:
-            df = df.append(pd.read_csv('./'+dirname+'/'+elem[1]+'.csv',
+            dftmp = pd.read_csv('./'+dirname+'/'+elem[1]+'.csv',
                                        encoding='utf-8',
-                                       usecols=['title','description','city','url']
-                                       ), ignore_index=True, sort=False)
-            df['score'] = elem[0]
+                                       usecols=['title', 'description', 'city', 'url']
+                                       )
+            dftmp['score'] = elem[0]
+            df = df.append(dftmp, ignore_index=True, sort=True)
+            del dftmp
         return df
 
-    def _score(self, price_max ,rooms_max, wante_city_coords, record, docid):
-        texas_radius = 1298
+    def _score(self, price_max,rooms_max, wante_city_coords, record):
+        texas_radius = 1298 #not random, we've calculated it
 
         def price_getter(actual_price, max_price):
-                if actual_price > max_price:
-                    return ((max_price-log(actual_price))/actual_price)
+            if actual_price > max_price:
+                return (max_price-log(actual_price))/actual_price
 
-                else:
-                    return ((-log(actual_price)+max_price)/max_price)
+            else:
+                return (-log(actual_price)+max_price)/max_price
 
         def rooms_getter(actual_room_number, max_room_number):
-           return(min(actual_room_number/max_room_number, max_room_number/actual_room_number))
+            return min(actual_room_number/max_room_number, max_room_number/actual_room_number)
 
 
 
@@ -484,24 +472,28 @@ class Miner:
         try:
             document_rooms = int(record['bedrooms_count']) #trasformare studio in 0
 
-        except:
+        except ValueError:
             document_rooms = 0.5
 
         price_score = price_getter(document_price, price_max)
         room_score = rooms_getter(document_rooms, rooms_max)
 
-        geo_score = (1-distance.distance(wante_city_coords, (record.loc['latitude'], record.loc['longitude'])).km/texas_radius)
-        return ('doc_'+str(docid), (1/3)*(geo_score+price_score+room_score))
-
-
-
+        geo_score = (1-distance.distance(wante_city_coords,
+                                         (record.loc['latitude'], record.loc['longitude'])).km/texas_radius)
+        return (1/3)*(geo_score+price_score+room_score)
 
     def get_all_scores(self):
-        gn = geocoders.GeoNames(username='lrnzgiusti')
+        """
+        This method get the score according to the parameters passed by input by the user
+        """
+        geo_names = geocoders.GeoNames(username='lrnzgiusti')
         #df = #il dataframe che esce fuori dalla query 3.1
-        q = self._query_builder()
-        price_max = input('What price you want?')
-        room_count = input('Hou many rooms you want?')
+        docs_containing_enitre_query = self.conjunctive_result()
+        price_max = int(input('What price you want?'))
+        room_count = int(input('Hou many rooms you want?'))
         wanted_city = input('In which city you would stay?')
-        _, city_coords = gn.geocode(wanted_city+', TX',timeout=30) #wanted city è un input
-        df['score'] = df.apply(lambda x: self._score(), axis = 1)
+        _, city_coords = geo_names.geocode(wanted_city+', TX', timeout=30) #wanted city è un input
+        docs_containing_enitre_query['score'] = docs_containing_enitre_query.apply(
+                lambda x: self._score(price_max, room_count, city_coords, x),
+                axis=1)
+        return docs_containing_enitre_query
