@@ -204,7 +204,7 @@ class FileHandler():
         """
         This download the Airbnb cvs file
         """
-        url = "https://raw.githubusercontent.com/lrnzgiusti/ADM-HW3-GP2/master/Airbnb_Texas_Rentaals.csv"
+        url = "https://raw.githubusercontent.com/lrnzgiusti/ADM-HW3-GP2/master/Airbnb_Texas_Rentals.csv"
         try:
             urlretrieve(url, "airbnb.csv")
         except HTTPError:
