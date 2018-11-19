@@ -16,6 +16,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from urllib.request import urlretrieve
+from urllib.error import HTTPError
 from math import log10, log
 from scipy.spatial.distance import cosine
 from geopy import distance, geocoders
@@ -203,8 +204,11 @@ class FileHandler():
         """
         This download the Airbnb cvs file
         """
-        url = "https://raw.githubusercontent.com/lrnzgiusti/ADM-HW3-GP2/master/Airbnb_Texas_Rentals.csv"
-        urlretrieve(url, "airbnb.csv")
+        url = "https://raw.githubusercontent.com/lrnzgiusti/ADM-HW3-GP2/master/Airbnb_Texas_Rentaals.csv"
+        try:
+            urlretrieve(url, "airbnb.csv")
+        except HTTPError:
+            return "KO"
         return "OK"
 
 class Miner:
