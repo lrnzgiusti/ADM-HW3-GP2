@@ -1,5 +1,7 @@
 # ADM-HW3-GP2
 
+## Lorenzo Giusti, Carlo Orsellini, Mahtab Fotovat 
+
 Here we put a brief description of the files contained in the repository:
 
 
