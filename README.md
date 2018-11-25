@@ -11,3 +11,4 @@ __search_engine.py:__ This is the library that contains all the classes and all 
 
 __map/reduce_1.py:__ These are the scripts for build the first inverted index with map-reduce framework, we prefer to run this instead of spark because the results are stored directly in the disk.
 
+__map.html:__ The folium map for the bonus point, we saved it because of the problems of github in loading maps. 
